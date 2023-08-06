@@ -1,21 +1,31 @@
-import * as acorn from 'acorn'
 import fs from 'fs'
-import * as Terser from 'terser'
 import path from 'path'
 import md5 from 'md5'
+import * as acorn from 'acorn'
+import { createClient } from 'redis'
+import { minify, BLACKLIST } from './shared.js'
+
+const client = createClient()
+
+await client.connect()
+
+await client.FLUSHALL()
 
 const INPUT_DIRECTORY = 'mapping-in'
-const OUTPUT_DIRECTORY = 'mapping-out'
 
-const map = new Map()
-
-function getSegments (code: string): string[] {
+function getSegments (code: string, filter: (node: acorn.Node) => boolean): Set<string> {
   const node = acorn.parse(code, {
     ecmaVersion: 'latest',
-    sourceType: 'module'
+    // sourceType: 'module',
+    allowReserved: true,
+    allowReturnOutsideFunction: true,
+    allowImportExportEverywhere: true,
+    allowAwaitOutsideFunction: true,
+    allowSuperOutsideMethod: true,
+    allowHashBang: true
   })
 
-  const segments: string[] = []
+  const segments = new Set<string>()
 
   parseNode(node)
 
@@ -27,19 +37,27 @@ function getSegments (code: string): string[] {
       node.end
     )
 
-    segments.push(segment)
+    segments.add(segment)
 
-    const body = 'body' in node ? node.body : undefined
+    for (const value of Object.values(node)) parseNodeValue(value)
+  }
 
-    if (body === undefined || body === null) return
-    if (!(Symbol.iterator in (body as any))) return
+  function parseNodeValue (value: any): void {
+    if (typeof value !== 'object') return
+    if (value === null) return
 
-    for (const child of (body as any)) parseNode(child)
+    if (Symbol.iterator in value) {
+      for (const data of value) parseNodeValue(data)
+
+      return
+    }
+
+    if (value instanceof acorn.Node) parseNode(value)
   }
 }
 
 async function getAllFilePaths (directory: string): Promise<string[]> {
-  const filePaths = []
+  const filePaths: string[] = []
 
   for (const file of await fs.promises.readdir(directory)) {
     const filePath = path.join(directory, file)
@@ -61,42 +79,51 @@ async function getAllFilePaths (directory: string): Promise<string[]> {
 }
 
 for (const directory of await fs.promises.readdir(INPUT_DIRECTORY)) {
-  const filePromises = []
+  const filePromises: Array<Promise<void>> = []
+
+  let segmentCount = 0
 
   for (const file of await getAllFilePaths(`${INPUT_DIRECTORY}/${directory}`)) {
     if (!file.endsWith('.js')) continue
     if (file.endsWith('.min.js')) continue
 
     filePromises.push((async () => {
-      try {
-        const code = await fs.promises.readFile(file, 'utf8')
+      const code = await fs.promises.readFile(file, 'utf8')
 
-        const segments = getSegments(code)
+      const segments = getSegments(
+        code,
+        node => !BLACKLIST.has(node.type)
+      )
 
-        const segmentPromises = []
+      segmentCount += segments.size
 
-        for (const segment of segments) {
-          segmentPromises.push((async () => {
-            const minified = await Terser.minify(segment)
+      const segmentPromises: Array<Promise<void>> = []
+
+      for (const segment of segments) {
+        segmentPromises.push((async () => {
+          try {
+            const minified = await minify(segment)
             const minifiedCode = minified.code
 
             if (minifiedCode === undefined) return
+            if (minifiedCode === '') return
 
             const hash = md5(minifiedCode)
 
-            if (map.has(hash)) return
-
-            map.set(
+            await client.set(
               hash,
               segment
             )
-          })())
-        }
+          } catch (error) {
+            if (!(error instanceof Error)) throw error
+            if (error.name === 'SyntaxError') return
 
-        await Promise.all(segmentPromises)
-      } catch (error) {
-        console.error(error)
+            console.error(error)
+          }
+        })())
       }
+
+      await Promise.all(segmentPromises)
     })())
   }
 
@@ -106,7 +133,7 @@ for (const directory of await fs.promises.readdir(INPUT_DIRECTORY)) {
 
   console.timeEnd(directory)
 
-  const json = JSON.stringify(Object.fromEntries(map.entries()))
-
-  await fs.promises.writeFile(`${OUTPUT_DIRECTORY}/${directory}.json`, json)
+  console.info(`Indexed Segments: ${segmentCount}`)
 }
+
+console.info('Done!')

@@ -1,29 +1,47 @@
 import * as acorn from 'acorn'
 import fs from 'fs'
 import md5 from 'md5'
-import * as Terser from 'terser'
+import { createClient } from 'redis'
+import { type MinifyOutput } from 'terser'
+import { minify, BLACKLIST } from './shared.js'
 
-const INPUT_DIRECTORY = 'mapping-out'
+const client = createClient()
+
+await client.connect()
+
 const INPUT_FILE = 'inflate/in.js'
 const OUTPUT_FILE = 'inflate/out.js'
 
-let code = await fs.promises.readFile(INPUT_FILE, 'utf8')
+const input = await fs.promises.readFile(INPUT_FILE, 'utf8')
 
-async function applyMappings (code: string, map: Record<string, string>): Promise<string> {
+let found = 0
+
+const interval = setInterval(logPercentage, 1000 / 12)
+
+const output = await applyMappings(input)
+
+await fs.promises.writeFile(OUTPUT_FILE, output)
+
+clearInterval(interval)
+
+logPercentage()
+console.log('Done!')
+
+async function applyMappings (code: string): Promise<string> {
   const node = acorn.parse(code, {
     ecmaVersion: 'latest',
     sourceType: 'module'
   })
 
-  const strings: string[] = []
-
-  for (let i = 0; i < code.length; i++) strings[i] ??= code[i]
+  let strings = code.split('')
 
   await inflate(node)
 
   return strings.join('')
 
   async function inflate (node: acorn.Node): Promise<void> {
+    if (BLACKLIST.has(node.type)) return
+
     const start = node.start
     const end = node.end
 
@@ -32,49 +50,82 @@ async function applyMappings (code: string, map: Record<string, string>): Promis
       end
     )
 
-    const minified = await Terser.minify(original)
+    let minified: MinifyOutput | undefined
+
+    try {
+      minified = await minify(original)
+    } catch (error) {}
+
+    if (minified === undefined) {
+      await inflateNodeValues(node)
+      return
+    }
+
     const minifiedCode = minified.code
 
     if (minifiedCode === undefined) {
-      await inflateBody()
+      await inflateNodeValues(node)
       return
     }
 
     const hash = md5(minifiedCode)
 
-    const unminified = map[hash]
+    const inflated = await client.get(hash)
 
-    if (unminified === undefined) {
-      await inflateBody()
+    if (inflated === null) {
+      await inflateNodeValues(node)
       return
     }
 
-    strings[start] = unminified
+    found += original.length
 
-    for (let i = start + 1; i < end + 1; i++) {
-      strings[i] = ''
+    const inflatedStrings = [...strings]
+
+    inflatedStrings[start] = inflated
+
+    for (let i = start + 1; i < end; i++) {
+      inflatedStrings[i] = ''
     }
 
-    async function inflateBody (): Promise<void> {
-      const body = 'body' in node ? node.body : undefined
+    const inflatedCode = inflatedStrings.join('')
 
-      if (body === undefined || body === null) return
-      if (!(Symbol.iterator in (body as any))) return
+    let valid: boolean | undefined
 
-      for (const child of (body as any)) await inflate(child)
+    try {
+      acorn.parse(code, {
+        ecmaVersion: 'latest',
+        sourceType: 'module'
+      })
+
+      valid = true
+    } catch (error) {
+      valid = false
+    }
+
+    if (!valid) return
+
+    strings = inflatedStrings
+
+    async function inflateNodeValues (node: acorn.Node): Promise<void> {
+      for (const value of Object.values(node)) await inflateNodeValue(value)
+    }
+
+    async function inflateNodeValue (value: any): Promise<void> {
+      if (typeof value !== 'object') return
+      if (value === null) return
+
+      if (Symbol.iterator in value) {
+        for (const data of value) await inflateNodeValue(data)
+
+        return
+      }
+
+      if (value instanceof acorn.Node) await inflate(value)
     }
   }
 }
 
-for (const file of await fs.promises.readdir(INPUT_DIRECTORY)) {
-  console.info('Applying mapping:', file)
-
-  const rawMap = await fs.promises.readFile(`${INPUT_DIRECTORY}/${file}`, 'utf8')
-  const map = JSON.parse(rawMap) as Record<string, string>
-
-  code = await applyMappings(code, map)
+function logPercentage (): void {
+  console.clear()
+  console.info(`${(found / input.length).toPrecision(5)}%`)
 }
-
-console.info('All mappings applied!')
-
-await fs.promises.writeFile(OUTPUT_FILE, code)
