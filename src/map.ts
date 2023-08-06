@@ -100,7 +100,11 @@ for (const directory of await fs.promises.readdir(INPUT_DIRECTORY)) {
     })())
   }
 
+  console.time(directory)
+
   await Promise.all(filePromises)
+
+  console.timeEnd(directory)
 
   const json = JSON.stringify(Object.fromEntries(map.entries()))
 

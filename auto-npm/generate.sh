@@ -2,7 +2,10 @@
 
 cd "$(dirname "$0")"
 
-npm pack "$(cat packages.txt)" --pack-destination tarballs
+for package in $(cat packages.txt)
+do
+  npm pack "$package" --pack-destination tarballs
+done
 
 for file in tarballs/*
 do
