@@ -24,3 +24,5 @@ Run `npm run un-minify` to un-minify `inflate/in.js` into `inflate/out.js`.
 auto-npm allows you to automatically generate mappings with a single command.
 
 Run `./auto-npm/generate.sh` to automatically download the top 50 packages from NPM. Than copy the `auto-npm/packages` folder into `mapping-in`.
+
+[Output with 200 packages (ipfs) (~3GB) (compressed)](https://ipfs.io/ipfs/QmNRPPTP6JuE81hnCycTjJdCunGfdMGGAQmc2Go7G2cz7a?filename=mapping-out.tar.zst)
