@@ -1,13 +1,13 @@
-import * as acorn from 'acorn'
 import fs from 'fs'
-import md5 from 'md5'
-import { createClient } from 'redis'
-import { type MinifyOutput } from 'terser'
-import { minify, BLACKLIST } from './shared.js'
 
-const client = createClient()
+import { db, hashCode, parse } from './shared.js'
+import * as acorn from 'acorn'
 
-await client.connect()
+const NODE_TYPE_BLACKLIST = new Set([
+  'Identifier',
+  'Literal',
+  'ThisExpression'
+])
 
 const INPUT_FILE = 'inflate/in.js'
 const OUTPUT_FILE = 'inflate/out.js'
@@ -28,83 +28,50 @@ logPercentage()
 console.log('Done!')
 
 async function applyMappings (code: string): Promise<string> {
-  const node = acorn.parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module'
-  })
+  const ast = parse(code)
 
-  let strings = code.split('')
+  const segments = code.split('')
 
-  await inflate(node)
+  await inflate(ast)
 
-  return strings.join('')
+  return segments.join('')
 
   async function inflate (node: acorn.Node): Promise<void> {
-    if (BLACKLIST.has(node.type)) return
+    if (NODE_TYPE_BLACKLIST.has(node.type)) return
 
     const start = node.start
     const end = node.end
 
-    const original = code.substring(
+    const segment = code.substring(
       start,
       end
     )
 
-    let minified: MinifyOutput | undefined
+    let hash: string | undefined
 
     try {
-      minified = await minify(original)
+      hash = hashCode(segment)
     } catch (error) {}
 
-    if (minified === undefined) {
+    if (hash === undefined) {
       await inflateNodeValues(node)
       return
     }
 
-    const minifiedCode = minified.code
-
-    if (minifiedCode === undefined) {
-      await inflateNodeValues(node)
-      return
-    }
-
-    const hash = md5(minifiedCode)
-
-    const inflated = await client.get(hash)
+    const inflated = await db.get(hash)
 
     if (inflated === null) {
       await inflateNodeValues(node)
       return
     }
 
-    found += original.length
+    found += segment.length
 
-    const inflatedStrings = [...strings]
-
-    inflatedStrings[start] = inflated
+    segments[start] = inflated
 
     for (let i = start + 1; i < end; i++) {
-      inflatedStrings[i] = ''
+      segments[i] = ''
     }
-
-    const inflatedCode = inflatedStrings.join('')
-
-    let valid: boolean | undefined
-
-    try {
-      acorn.parse(code, {
-        ecmaVersion: 'latest',
-        sourceType: 'module'
-      })
-
-      valid = true
-    } catch (error) {
-      valid = false
-    }
-
-    if (!valid) return
-
-    strings = inflatedStrings
 
     async function inflateNodeValues (node: acorn.Node): Promise<void> {
       for (const value of Object.values(node)) await inflateNodeValue(value)
