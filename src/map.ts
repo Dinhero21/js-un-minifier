@@ -27,57 +27,65 @@ async function getAllFilePaths (directory: string): Promise<string[]> {
   return filePaths
 }
 
-for (const directory of await fs.promises.readdir(INPUT_DIRECTORY)) {
-  const filePromises: Array<Promise<void>> = []
+let segmentCount = 0
 
-  let segmentCount = 0
+const DIRECTORIES = await fs.promises.readdir(INPUT_DIRECTORY)
 
-  for (const file of await getAllFilePaths(`${INPUT_DIRECTORY}/${directory}`)) {
+for (let directoryIndex = 0; directoryIndex < DIRECTORIES.length; directoryIndex++) {
+  const directory = DIRECTORIES[directoryIndex]
+
+  const FILES = await getAllFilePaths(`${INPUT_DIRECTORY}/${directory}`)
+
+  for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
+    const file = FILES[fileIndex]
+
     if (!file.endsWith('.js')) continue
     if (file.endsWith('.min.js')) continue
 
-    filePromises.push((async () => {
-      const code = await fs.promises.readFile(file, 'utf8')
+    console.clear()
+    console.info(`${directory} (${(directoryIndex / DIRECTORIES.length * 100).toFixed(2)}%)`)
+    console.info(`${file} (${(fileIndex / FILES.length * 100).toFixed(2)}%)`)
+    console.info(`Segments: ${segmentCount}`)
 
-      const ast = parse(code)
+    const code = await fs.promises.readFile(file, 'utf8')
 
-      const segmentPromises: Array<Promise<void>> = []
+    let ast
+    try {
+      ast = parse(code)
+    } catch (error) {}
 
-      walk.full(ast, node => {
-        segmentPromises.push((async () => {
-          const segment = code.substring(
-            node.start,
-            node.end
-          )
+    if (ast === undefined) continue
 
-          let hash
+    const segmentPromises: Array<Promise<void>> = []
 
-          try {
-            hash = hashCode(segment)
-          } catch (error) {}
+    walk.full(ast, node => {
+      segmentPromises.push((async () => {
+        const segment = code.substring(
+          node.start,
+          node.end
+        )
 
-          if (hash === undefined) return
+        let hash
 
-          segmentCount++
+        try {
+          hash = hashCode(segment)
+        } catch (error) {}
 
-          await db.set(
-            hash,
-            segment
-          )
-        })())
-      })
+        if (hash === undefined) return
 
-      await Promise.all(segmentPromises)
-    })())
+        segmentCount++
+
+        await db.set(
+          hash,
+          segment
+        )
+      })())
+    })
+
+    await Promise.all(segmentPromises)
   }
-
-  console.time(directory)
-
-  await Promise.all(filePromises)
-
-  console.timeEnd(directory)
-
-  console.info(`Indexed Segments: ${segmentCount}`)
 }
 
+console.clear()
 console.info('Done!')
+console.info(`Indexed ${segmentCount} segments`)
