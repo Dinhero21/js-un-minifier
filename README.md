@@ -19,10 +19,10 @@ Run `npm run un-minify` to un-minify `inflate/in.js` into `inflate/out.js`.
 
 ### auto-npm
 
-⚠️ This will take a very long time and use a lot of fs, might damage hard drives or SSDs ⚠️
-
 auto-npm allows you to automatically generate mappings with a single command.
 
 Run `./auto-npm/generate.sh` to automatically download the top 50 packages from NPM. Than copy the `auto-npm/packages` folder into `mapping-in`.
 
-[Output with 200 packages (ipfs) (~3GB) (compressed)](https://ipfs.io/ipfs/QmNRPPTP6JuE81hnCycTjJdCunGfdMGGAQmc2Go7G2cz7a?filename=mapping-out.tar.zst)
+[200 Packages (~51MiB)](https://ipfs.io/ipfs/QmRZsKmbYGAcpAPVUeUegLACsUb1fxfGZaC4UkhKu278G5?filename=packages.tar.zst)
+
+[Mappings with 200 packages (~256MiB)](https://ipfs.io/ipfs/QmPBrnwPjupJBRGmLM3Dv275xnxyuF4nXBFaZSNcXsB2p7?filename=package-200.rdb.zst)

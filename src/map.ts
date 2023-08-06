@@ -40,14 +40,22 @@ for (let directoryIndex = 0; directoryIndex < DIRECTORIES.length; directoryIndex
     const file = FILES[fileIndex]
 
     if (!file.endsWith('.js')) continue
-    if (file.endsWith('.min.js')) continue
+    if (file.endsWith('min.js')) continue
+    if (file.endsWith('bundle.js')) continue
 
-    console.clear()
-    console.info(`${directory} (${(directoryIndex / DIRECTORIES.length * 100).toFixed(2)}%)`)
-    console.info(`${file} (${(fileIndex / FILES.length * 100).toFixed(2)}%)`)
-    console.info(`Segments: ${segmentCount}`)
+    const fileDirectories = file.split('/')
+
+    if (fileDirectories.includes('dist')) continue
+    if (fileDirectories.includes('out')) continue
 
     const code = await fs.promises.readFile(file, 'utf8')
+
+    if (code.length / ((code.match(/\//g) ?? []).length + 1) > 100) continue
+
+    console.clear()
+    console.info(`(${(directoryIndex / DIRECTORIES.length * 100).toFixed(2)}%) ${directory} `)
+    console.info(`(${(fileIndex / FILES.length * 100).toFixed(2)}%) ${file}`)
+    console.info(`Segments: ${segmentCount}`)
 
     let ast
     try {
