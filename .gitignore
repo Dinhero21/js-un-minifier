@@ -125,3 +125,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Project Specific
+
+inflate/*
+mapping-in/*
+mapping-out/*
+
+auto-npm/packages/*
+auto-npm/tarballs/*
