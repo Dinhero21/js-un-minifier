@@ -28,3 +28,5 @@ Run `./auto-npm/generate.sh` to automatically download the top 50 packages from 
 [mapping-in with 200 Packages (~51MiB)](https://ipfs.io/ipfs/QmRZsKmbYGAcpAPVUeUegLACsUb1fxfGZaC4UkhKu278G5?filename=packages.tar.zst)
 
 [Redis Snapshot with 200 packages (~256MiB)](https://ipfs.io/ipfs/QmPBrnwPjupJBRGmLM3Dv275xnxyuF4nXBFaZSNcXsB2p7?filename=package-200.rdb.zst)
+
+[Redis Snapshot with 1000 packages (~409MiB)](https://ipfs.io/ipfs/QmZVDausAsdbhSrz3A5NoF2GBgwg1Tr7AbKkuzPGm3fKJ1?filename=package-1k.rdb.zst)
