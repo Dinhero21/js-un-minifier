@@ -29,69 +29,62 @@ async function getAllFilePaths (directory: string): Promise<string[]> {
 
 let segmentCount = 0
 
-const DIRECTORIES = await fs.promises.readdir(INPUT_DIRECTORY)
+const FILES = await getAllFilePaths(INPUT_DIRECTORY)
 
-for (let directoryIndex = 0; directoryIndex < DIRECTORIES.length; directoryIndex++) {
-  const directory = DIRECTORIES[directoryIndex]
+for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
+  const file = FILES[fileIndex]
 
-  const FILES = await getAllFilePaths(`${INPUT_DIRECTORY}/${directory}`)
+  if (!file.endsWith('.js')) continue
+  if (file.endsWith('min.js')) continue
+  if (file.endsWith('bundle.js')) continue
 
-  for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
-    const file = FILES[fileIndex]
+  const fileDirectories = file.split('/')
 
-    if (!file.endsWith('.js')) continue
-    if (file.endsWith('min.js')) continue
-    if (file.endsWith('bundle.js')) continue
+  if (fileDirectories.includes('dist')) continue
+  if (fileDirectories.includes('out')) continue
 
-    const fileDirectories = file.split('/')
+  const code = await fs.promises.readFile(file, 'utf8')
 
-    if (fileDirectories.includes('dist')) continue
-    if (fileDirectories.includes('out')) continue
+  if (code.length / ((code.match(/\//g) ?? []).length + 1) > 100) continue
 
-    const code = await fs.promises.readFile(file, 'utf8')
+  console.clear()
+  console.info(`(${(fileIndex / FILES.length * 100).toFixed(2)}%) ${file}`)
+  console.info(`Segments: ${segmentCount}`)
 
-    if (code.length / ((code.match(/\//g) ?? []).length + 1) > 100) continue
+  let ast
+  try {
+    ast = parse(code)
+  } catch (error) {}
 
-    console.clear()
-    console.info(`(${(directoryIndex / DIRECTORIES.length * 100).toFixed(2)}%) ${directory} `)
-    console.info(`(${(fileIndex / FILES.length * 100).toFixed(2)}%) ${file}`)
-    console.info(`Segments: ${segmentCount}`)
+  if (ast === undefined) continue
 
-    let ast
-    try {
-      ast = parse(code)
-    } catch (error) {}
+  const segmentPromises: Array<Promise<void>> = []
 
-    if (ast === undefined) continue
+  walk.full(ast, node => {
+    segmentPromises.push((async () => {
+      const segment = code.substring(
+        node.start,
+        node.end
+      )
 
-    const segmentPromises: Array<Promise<void>> = []
+      let hash
 
-    walk.full(ast, node => {
-      segmentPromises.push((async () => {
-        const segment = code.substring(
-          node.start,
-          node.end
-        )
+      try {
+        hash = hashCode(segment)
+      } catch (error) {}
 
-        let hash
+      if (hash === undefined) return
 
-        try {
-          hash = hashCode(segment)
-        } catch (error) {}
+      segmentCount++
 
-        if (hash === undefined) return
+      await db.set(
+        hash,
+        segment
+      )
+    })())
+  })
 
-        segmentCount++
-
-        await db.set(
-          hash,
-          segment
-        )
-      })())
-    })
-
-    await Promise.all(segmentPromises)
-  }
+  await Promise.all(segmentPromises)
 }
 
 console.clear()
