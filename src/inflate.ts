@@ -94,5 +94,5 @@ async function applyMappings (code: string): Promise<string> {
 
 function logPercentage (): void {
   console.clear()
-  console.info(`${(found / input.length).toPrecision(5)}%`)
+  console.info(`${((found / input.length) * 100).toPrecision(5)}%`)
 }
