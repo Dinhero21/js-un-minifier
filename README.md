@@ -13,9 +13,11 @@
 
 ## 🚀 Usage
 
-Run `npm run generate-map` to populate `mapping-out` with the mappings present in `mapping-in`.
+Set up a [redis](https://redis.io/) database.
 
-Run `npm run un-minify` to un-minify `inflate/in.js` into `inflate/out.js`.
+Run `npm run generate-map` to populate the database with the files present in `mapping-in `.
+
+Run `npm run un-minify` to un-minify `inflate/in.js` into `inflate/out.js` using the mappings present in the database.
 
 ### auto-npm
 
@@ -23,6 +25,6 @@ auto-npm allows you to automatically generate mappings with a single command.
 
 Run `./auto-npm/generate.sh` to automatically download the top 50 packages from NPM. Than copy the `auto-npm/packages` folder into `mapping-in`.
 
-[200 Packages (~51MiB)](https://ipfs.io/ipfs/QmRZsKmbYGAcpAPVUeUegLACsUb1fxfGZaC4UkhKu278G5?filename=packages.tar.zst)
+[mapping-in with 200 Packages (~51MiB)](https://ipfs.io/ipfs/QmRZsKmbYGAcpAPVUeUegLACsUb1fxfGZaC4UkhKu278G5?filename=packages.tar.zst)
 
-[Mappings with 200 packages (~256MiB)](https://ipfs.io/ipfs/QmPBrnwPjupJBRGmLM3Dv275xnxyuF4nXBFaZSNcXsB2p7?filename=package-200.rdb.zst)
+[Redis Snapshot with 200 packages (~256MiB)](https://ipfs.io/ipfs/QmPBrnwPjupJBRGmLM3Dv275xnxyuF4nXBFaZSNcXsB2p7?filename=package-200.rdb.zst)
