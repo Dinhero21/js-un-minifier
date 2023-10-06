@@ -1,7 +1,8 @@
 import fs from 'fs'
 import path from 'path'
-import * as walk from 'acorn-walk'
-import { db, hashCode, parse } from './shared.js'
+import ESTraverse from 'estraverse'
+import { db, getNames, hashCode, parse } from './shared.js'
+import { type Node } from 'estree'
 
 const INPUT_DIRECTORY = 'mapping-in'
 
@@ -29,14 +30,15 @@ async function getAllFilePaths (directory: string): Promise<string[]> {
 
 let segmentCount = 0
 
-const FILES = await getAllFilePaths(INPUT_DIRECTORY)
+const FILES: string[] = await getAllFilePaths(INPUT_DIRECTORY)
+
+let fileCount = 0
 
 for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
   const file = FILES[fileIndex]
 
-  if (!file.endsWith('.js')) continue
-  if (file.endsWith('min.js')) continue
-  if (file.endsWith('bundle.js')) continue
+  if (!/\.[mc]?js$/.test(file)) continue
+  if (/(min|bundle)\.[mc]?js$/.test(file)) continue
 
   const fileDirectories = file.split('/')
 
@@ -47,11 +49,13 @@ for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
 
   if (code.length / ((code.match(/\//g) ?? []).length + 1) > 100) continue
 
+  fileCount++
+
   console.clear()
   console.info(`(${(fileIndex / FILES.length * 100).toFixed(2)}%) ${file}`)
   console.info(`Segments: ${segmentCount}`)
 
-  let ast
+  let ast: Node | undefined
   try {
     ast = parse(code)
   } catch (error) {}
@@ -60,28 +64,28 @@ for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
 
   const segmentPromises: Array<Promise<void>> = []
 
-  walk.full(ast, node => {
-    segmentPromises.push((async () => {
-      const segment = code.substring(
-        node.start,
-        node.end
-      )
+  ESTraverse.traverse(ast, {
+    enter (node) {
+      segmentPromises.push((async () => {
+        let hash
 
-      let hash
+        try {
+          hash = hashCode(node)
+        } catch (error) {}
 
-      try {
-        hash = hashCode(segment)
-      } catch (error) {}
+        if (hash === undefined) return
 
-      if (hash === undefined) return
+        segmentCount++
 
-      segmentCount++
+        const names = getNames(node)
+        const nameArray = Array.from(names)
 
-      await db.set(
-        hash,
-        segment
-      )
-    })())
+        await db.set(
+          hash,
+          JSON.stringify(nameArray)
+        )
+      })())
+    }
   })
 
   await Promise.all(segmentPromises)
@@ -89,4 +93,4 @@ for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
 
 console.clear()
 console.info('Done!')
-console.info(`Indexed ${segmentCount} segments`)
+console.info(`Indexed ${segmentCount} segments from ${fileCount} files`)

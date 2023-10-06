@@ -1,7 +1,8 @@
 import fs from 'fs'
-
-import { db, hashCode, parse } from './shared.js'
-import * as acorn from 'acorn'
+import { applyMapping, createMapping, db, getNames, hashCode, parse } from './shared.js'
+import { generate } from 'escodegen'
+import { type Node } from 'estree'
+import ESTraverse from 'estraverse'
 
 const NODE_TYPE_BLACKLIST = new Set([
   'Identifier',
@@ -12,87 +13,92 @@ const NODE_TYPE_BLACKLIST = new Set([
 const INPUT_FILE = 'inflate/in.js'
 const OUTPUT_FILE = 'inflate/out.js'
 
+console.info('Reading input...')
+
 const input = await fs.promises.readFile(INPUT_FILE, 'utf8')
 
-let found = 0
+console.info('Parsing ast...')
 
-const interval = setInterval(logPercentage, 1000 / 12)
+const ast = parse(input)
 
-const output = await applyMappings(input)
+console.info('Predicting mappings...')
+
+const mappings = await predictMappings(ast)
+
+console.info('Listing names...')
+
+const names = getNames(ast)
+
+const TOTAL_MAPPED_NAME_COUNT = Array.from(mappings.values()).reduce((a, b) => a + b.size, 0)
+const UNIQUE_MAPPED_NAME_COUNT = mappings.size
+const NAME_COUNT = names.size
+
+console.info(`Predicted ${TOTAL_MAPPED_NAME_COUNT} names (${UNIQUE_MAPPED_NAME_COUNT} unique) out of ${NAME_COUNT} (${(UNIQUE_MAPPED_NAME_COUNT / NAME_COUNT * 100).toFixed(2)}%)`)
+
+console.info('Generating mapping...')
+
+const mapping = new Map<string, string>()
+
+for (const [from, tos] of mappings) {
+  mapping.set(from, `/*${Array.from(tos).join(',')}*/${from}`)
+}
+
+console.info('Applying mapping...')
+
+applyMapping(ast, mapping)
+
+console.info('Generating output...')
+
+const output = generate(ast)
+
+console.info('Writing output...')
 
 await fs.promises.writeFile(OUTPUT_FILE, output)
 
-clearInterval(interval)
+console.info('Done!')
 
-logPercentage()
-console.log('Done!')
+async function predictMappings (ast: Node, mappings = new Map<string, Set<string>>()): Promise<Map<string, Set<string>>> {
+  const hash = hashCode(ast)
 
-async function applyMappings (code: string): Promise<string> {
-  const ast = parse(code)
+  const rawNames = await db.get(hash)
 
-  const segments = code.split('')
-
-  await inflate(ast)
-
-  return segments.join('')
-
-  async function inflate (node: acorn.Node): Promise<void> {
-    if (NODE_TYPE_BLACKLIST.has(node.type)) return
-
-    const start = node.start
-    const end = node.end
-
-    const segment = code.substring(
-      start,
-      end
-    )
-
-    let hash: string | undefined
-
-    try {
-      hash = hashCode(segment)
-    } catch (error) {}
-
-    if (hash === undefined) {
-      await inflateNodeValues(node)
-      return
-    }
-
-    const inflated = await db.get(hash)
-
-    if (inflated === null) {
-      await inflateNodeValues(node)
-      return
-    }
-
-    found += segment.length
-
-    segments[start] = inflated
-
-    for (let i = start + 1; i < end; i++) {
-      segments[i] = ''
-    }
-
-    async function inflateNodeValues (node: acorn.Node): Promise<void> {
-      for (const value of Object.values(node)) await inflateNodeValue(value)
-    }
-
-    async function inflateNodeValue (value: any): Promise<void> {
-      if (typeof value !== 'object') return
-      if (value === null) return
-
-      if (Symbol.iterator in value) {
-        for (const data of value) await inflateNodeValue(data)
-
-        return
-      }
-
-      if (value instanceof acorn.Node) await inflate(value)
-    }
+  if (rawNames === null) {
+    await inflateNode(ast)
+    return mappings
   }
-}
 
-function logPercentage (): void {
-  console.clear()
-  console.info(`${((found / input.length) * 100).toPrecision(5)}%`)
+  const nameArray = JSON.parse(rawNames)
+
+  if (!Array.isArray(nameArray)) throw new TypeError('Expected array')
+
+  const to = new Set(nameArray)
+
+  const from = getNames(ast)
+
+  const map = createMapping(from, to)
+
+  for (const [from, to] of map) {
+    const set = mappings.get(from) ?? new Set()
+    mappings.set(from, set)
+
+    set.add(to)
+  }
+
+  async function inflateNode (node: Node): Promise<void> {
+    const promises: Array<Promise<any>> = []
+
+    ESTraverse.traverse(node, {
+      enter (node) {
+        if (NODE_TYPE_BLACKLIST.has(node.type)) return
+
+        this.skip()
+
+        promises.push(predictMappings(node, mappings))
+      }
+    })
+
+    await Promise.all(promises)
+  }
+
+  return mappings
 }
