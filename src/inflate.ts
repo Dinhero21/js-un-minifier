@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { applyMapping, createMapping, db, getNames, hashCode, parse } from './shared.js'
+import { applyMapping, createMapping, db, getLocalNames, getNames, hashCode, parse } from './shared.js'
 import { generate } from 'escodegen'
 import { type Node } from 'estree'
 import ESTraverse from 'estraverse'
@@ -21,31 +21,9 @@ console.info('Parsing ast...')
 
 const ast = parse(input)
 
-console.info('Predicting mappings...')
+console.info('Inflating...')
 
-const mappings = await predictMappings(ast)
-
-console.info('Listing names...')
-
-const names = getNames(ast)
-
-const TOTAL_MAPPED_NAME_COUNT = Array.from(mappings.values()).reduce((a, b) => a + b.size, 0)
-const UNIQUE_MAPPED_NAME_COUNT = mappings.size
-const NAME_COUNT = names.size
-
-console.info(`Predicted ${TOTAL_MAPPED_NAME_COUNT} names (${UNIQUE_MAPPED_NAME_COUNT} unique) out of ${NAME_COUNT} (${(UNIQUE_MAPPED_NAME_COUNT / NAME_COUNT * 100).toFixed(2)}%)`)
-
-console.info('Generating mapping...')
-
-const mapping = new Map<string, string>()
-
-for (const [from, tos] of mappings) {
-  mapping.set(from, `/*${Array.from(tos).join(',')}*/${from}`)
-}
-
-console.info('Applying mapping...')
-
-applyMapping(ast, mapping)
+await inflate(ast)
 
 console.info('Generating output...')
 
@@ -57,13 +35,34 @@ await fs.promises.writeFile(OUTPUT_FILE, output)
 
 console.info('Done!')
 
-async function predictMappings (ast: Node, mappings = new Map<string, Set<string>>()): Promise<Map<string, Set<string>>> {
+async function inflate (ast: Node): Promise<void> {
+  const mappings = await inflateScope(ast)
+
+  const mapping = new Map<string, string>()
+
+  for (const [from, tos] of mappings) {
+    mapping.set(from, `/*GLOBAL:${Array.from(tos.values()).join(',')}*/${from}`)
+  }
+
+  applyMapping(ast, mapping)
+}
+
+async function inflateScope (ast: Node): Promise<Map<string, Set<string>>> {
   const hash = hashCode(ast)
 
   const rawNames = await db.get(hash)
 
   if (rawNames === null) {
-    await inflateNode(ast)
+    const mappings = await inflateNode(ast)
+
+    const mapping = new Map<string, string>()
+
+    for (const [from, tos] of mappings) {
+      mapping.set(from, `/*${Array.from(tos.values()).join(',')}*/${from}`)
+    }
+
+    applyMapping(ast, mapping)
+
     return mappings
   }
 
@@ -75,30 +74,72 @@ async function predictMappings (ast: Node, mappings = new Map<string, Set<string
 
   const from = getNames(ast)
 
-  const map = createMapping(from, to)
+  const mapping = createMapping(from, to)
 
-  for (const [from, to] of map) {
-    const set = mappings.get(from) ?? new Set()
-    mappings.set(from, set)
+  const outOfScopeMapping = new Map<string, Set<string>>()
 
-    set.add(to)
+  for (const [from, to] of getOutOfScopeMappings(mapping)) {
+    const tos = new Set([to])
+
+    outOfScopeMapping.set(from, tos)
   }
 
-  async function inflateNode (node: Node): Promise<void> {
-    const promises: Array<Promise<any>> = []
+  applyMappingPretty(mapping)
+
+  return outOfScopeMapping
+
+  async function inflateNode (node: Node): Promise<Map<string, Set<string>>> {
+    const promises: Array<Promise<Map<string, Set<string>>>> = []
 
     ESTraverse.traverse(node, {
       enter (node) {
+        if (node === ast) return
+
         if (NODE_TYPE_BLACKLIST.has(node.type)) return
 
         this.skip()
 
-        promises.push(predictMappings(node, mappings))
+        promises.push(inflateScope(node))
       }
     })
 
-    await Promise.all(promises)
+    const maps = await Promise.all(promises)
+
+    const outOfScopeMap = new Map<string, Set<string>>()
+
+    for (const map of maps) {
+      for (const [from, tos] of map) {
+        const set = outOfScopeMap.get(from) ?? new Set()
+        outOfScopeMap.set(from, set)
+
+        for (const to of tos) set.add(to)
+      }
+    }
+
+    return outOfScopeMap
   }
 
-  return mappings
+  function getOutOfScopeMappings (mapping: Map<string, string>): Map<string, string> {
+    const outOfScopeMapping = new Map<string, string>()
+
+    const localNames = getLocalNames(ast)
+
+    for (const [from, to] of mapping) {
+      if (localNames.has(from)) continue
+
+      outOfScopeMapping.set(from, to)
+    }
+
+    return outOfScopeMapping
+  }
+
+  function applyMappingPretty (mapping: Map<string, string>): void {
+    const prettyMapping = new Map<string, string>()
+
+    for (const [from, to] of mapping) {
+      prettyMapping.set(from, `/*${to}*/${from}`)
+    }
+
+    applyMapping(ast, prettyMapping)
+  }
 }

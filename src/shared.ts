@@ -5,6 +5,8 @@ import md5 from 'md5'
 import { createClient } from 'redis'
 import ESTraverse from 'estraverse'
 
+export type NodeFilter = (node: Node, parent: Node | null) => boolean
+
 export const db = createClient()
 
 await db.connect()
@@ -20,11 +22,17 @@ export function getName (node: Node): string | undefined {
   if ('name' in node) return node.name
 }
 
-export function getNames (ast: Node): Set<string> {
+export function getNames (ast: Node, skip: NodeFilter = () => false): Set<string> {
   const names = new Set<string>()
 
   ESTraverse.traverse(ast, {
-    enter (node) {
+    enter (node, parent) {
+      if (skip(node, parent)) {
+        this.skip()
+
+        return
+      }
+
       const name = getName(node)
 
       if (name === undefined) return
@@ -34,6 +42,18 @@ export function getNames (ast: Node): Set<string> {
   })
 
   return names
+}
+
+export function getLocalNames (ast: Node): Set<string> {
+  return getNames(
+    ast,
+    (node, parent) =>
+      node.type.includes('Expression') ||
+      (
+        parent?.type === 'ReturnStatement' &&
+        node.type === 'Identifier'
+      )
+  )
 }
 
 export function createMapping (from: Set<string>, to: Set<string>): Map<string, string> {

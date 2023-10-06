@@ -47,7 +47,7 @@ for (let fileIndex = 0; fileIndex < FILES.length; fileIndex++) {
 
   const code = await fs.promises.readFile(file, 'utf8')
 
-  if (code.length / ((code.match(/\//g) ?? []).length + 1) > 100) continue
+  if (code.length / ((code.match(/(\r?)\n/g) ?? []).length + 1) > 100) continue
 
   fileCount++
 
