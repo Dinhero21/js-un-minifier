@@ -4,10 +4,11 @@ import { generate } from 'escodegen'
 import { type Node } from 'estree'
 import ESTraverse from 'estraverse'
 
-const NODE_TYPE_BLACKLIST = new Set([
+const NODE_TYPE_BLACKLIST = new Set<Node['type']>([
   'Identifier',
   'Literal',
-  'ThisExpression'
+  'ThisExpression',
+  'MemberExpression'
 ])
 
 const INPUT_FILE = 'inflate/in.js'
